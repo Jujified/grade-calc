@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Classroom Grade Calculator",
+  "version": "1.0.0",
+  "description": "Calculates your overall grade on the Google Classroom \"Your work\" page, with weighted categories and what-if scores, even when the teacher hides the overall grade.",
+  "permissions": ["storage"],
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": { "default_title": "Show / hide the grade calculator" },
+  "background": { "service_worker": "src/background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://classroom.google.com/*"],
+      "js": ["src/grade.js", "src/parser.js", "src/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
