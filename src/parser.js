@@ -16,6 +16,7 @@
   const BULLET_RE = /\s*[•·∙‧●・]\s*/;
   const NUM = '(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:[.,]\\d+)?)';
   const SCORE_RE = new RegExp('^' + NUM + '\\s*/\\s*' + NUM + '(?:\\s*\\(.*\\))?$');
+  const SPOKEN_SCORE_RE = /(\d[\d.,]*)\s+points?\s+out\s+of\s+(?:a\s+)?possible\s+(\d[\d.,]*)/i;
   const PERIOD_NAME_RE =
     /^(?:(?:semester|quarter|trimester|term|(?:grading|marking) period)\s*\d+|[sqt]\d|\d(?:st|nd|rd|th)\s+(?:semester|quarter|trimester|term))$/i;
   const STATUS_WORDS = [
@@ -159,22 +160,32 @@
       const meta = splitMeta(clean(metaEl.textContent), metaNodes.map((n) => n.nodeValue));
 
       const others = nodes.filter((n) => n !== titleNode && !metaEl.contains(n));
+      // The score can be one text node ("9/10") or split across elements
+      // (Classroom renders <span>9.5</span><span>/10</span>), so also try the
+      // combined text of the nearest few ancestors.
       let score = null;
       for (const n of others) {
         score = parseScore(n.nodeValue);
-        if (!score) {
-          const p = n.parentElement;
-          if (p !== el && !p.contains(titleNode) && !p.contains(marker)) {
-            score = parseScore(p.textContent);
-          }
+        let up = n.parentElement;
+        for (let depth = 0; !score && depth < 3 && up && up !== el; depth++, up = up.parentElement) {
+          if (up.contains(titleNode) || up.contains(marker)) break;
+          score = parseScore(up.textContent);
         }
         if (score) break;
+      }
+      // Fallback: the screen-reader label "9.5 points out of possible 10".
+      if (!score) {
+        const m = SPOKEN_SCORE_RE.exec(clean(el.textContent));
+        if (m) score = parseScore(m[1].replace(/[.,]$/, '') + '/' + m[2].replace(/[.,]$/, ''));
       }
       const otherText = others.map((n) => clean(n.nodeValue));
       const status =
         STATUS_WORDS.find((w) => otherText.some((t) => t.toLowerCase() === w.toLowerCase())) || '';
 
-      raw.push({ title: clean(titleNode.nodeValue), due: meta.due, rest: meta.rest, score, status });
+      // Classroom tags each row with a stable assignment id; prefer it for what-ifs.
+      const idEl = el.closest('[data-stream-item-id]') || el.querySelector('[data-stream-item-id]');
+      const streamId = idEl ? idEl.getAttribute('data-stream-item-id') : null;
+      raw.push({ title: clean(titleNode.nodeValue), due: meta.due, rest: meta.rest, score, status, streamId });
     }
 
     // 4. Decide which meta parts are grading periods and which are categories.
@@ -194,7 +205,7 @@
       }
       const excused = r.status === 'Excused';
       const graded = !!r.score && !excused;
-      const base = r.title + '¦' + r.due;
+      const base = r.streamId ? 'id:' + r.streamId : r.title + '¦' + r.due;
       const n = (seenIds.get(base) || 0) + 1;
       seenIds.set(base, n);
       return {

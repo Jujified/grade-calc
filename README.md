@@ -15,7 +15,10 @@ grade. Supports weighted categories, grading periods and what-if scores.
 
 1. In Classroom open a class → **Classwork** → **View your work**.
 2. Keep the task filter on **All** and scroll to the bottom so every assignment is loaded.
-3. The panel in the top-right shows your grade. Click its header to collapse it.
+3. Your calculated grade appears to the right of your name, where Classroom's own
+   grade would be. Click **View details** under it for categories, weights and what-ifs.
+   (If Classroom is already showing its own grade there, the calculator floats in the
+   top-right corner instead.)
 
 - **Total points**: points earned ÷ points possible across all graded work.
 - **Weighted by category**: type each category's weight (from your syllabus —

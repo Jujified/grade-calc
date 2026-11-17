@@ -19,7 +19,7 @@ const near = (a, b) => assert.ok(Math.abs(a - b) < 0.006, `${a} != ${b}`);
   });
   await ctx.route('https://classroom.google.com/**', (route) => {
     const p = new URL(route.request().url()).pathname;
-    const file = p.includes('/c/AAA/') ? 'a.html' : p.includes('/c/BBB/') ? 'b.html' : null;
+    const file = p.includes('/c/AAA/') ? 'a.html' : p.includes('/c/BBB/') ? 'b.html' : p.includes('/c/CCC/') ? 'c.html' : null;
     route.fulfill({
       contentType: 'text/html',
       body: file ? fs.readFileSync(path.join(__dirname, 'fixtures', file), 'utf8') : '<h1>Stream</h1><p>Due tomorrow • x</p>',
@@ -78,10 +78,36 @@ const near = (a, b) => assert.ok(Math.abs(a - b) < 0.006, `${a} != ${b}`);
   assert.equal(await panel.locator('.item .name').last().textContent(), 'Due Nov 1 draft');
   await shot('b-points');
 
+  // --- Fixture C: real Classroom markup (score split across spans, hidden Classwork view) ---
+  await page.goto('https://classroom.google.com/u/1/c/CCC/sp/123/all/default');
+  await panel.waitFor();
+  const badge = page.locator('[data-grade-calc-badge]');
+  near(await pct(), (9.5 + 92.5) / 110 * 100);
+  assert.match(await panel.locator('summary').innerText(), /2 graded of 5/i);
+  assert.deepEqual(await panel.locator('tbody tr td:first-child').allInnerTexts(),
+    ['Peer Coverages', 'Script Submissions', 'No category']);
+  // grade is shown in the header, at the right of the student's name
+  near(parseFloat(await badge.locator('.pct').innerText()), (9.5 + 92.5) / 110 * 100);
+  assert.match(await badge.locator('.label').innerText(), /Semester 1/);
+  const bb = await badge.boundingBox();
+  const nb = await page.locator('h2:visible', { hasText: 'Julian Cimoca' }).boundingBox();
+  assert.ok(bb.x > nb.x + nb.width && Math.abs(bb.y + bb.height / 2 - (nb.y + nb.height / 2)) < 60);
+  await shot('c-open');
+  await badge.getByRole('button', { name: 'Hide details' }).click();
+  assert.equal(await panel.isVisible(), false);
+  await shot('c-badge-only');
+  await badge.getByRole('button', { name: 'View details' }).click();
+  await panel.getByRole('button', { name: 'Weighted by category' }).click();
+  await panel.getByLabel('Weight for Peer Coverages').fill('40');
+  await panel.getByLabel('Weight for Script Submissions').fill('60');
+  near(await pct(), 0.4 * 95 + 0.6 * 92.5);
+  near(parseFloat(await badge.locator('.pct').innerText()), 0.4 * 95 + 0.6 * 92.5);
+
   // --- not shown on other Classroom pages ---
   await page.goto('https://classroom.google.com/u/0/h');
   await page.waitForTimeout(1500);
   assert.equal(await panel.isVisible(), false);
+  assert.equal(await page.locator('[data-grade-calc-badge]').count(), 0);
 
   await ctx.close();
   console.log('e2e: all checks passed');

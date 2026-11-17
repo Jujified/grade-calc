@@ -45,6 +45,8 @@
   let refs = null;
   let host = null;
   let shadow = null;
+  let badge = null; // inline grade shown in the page header, where Classroom's own grade would be
+  let badgeRefs = null;
 
   function getCourseKey() {
     const m = /\/c\/([^/?#]+)/.exec(location.pathname);
@@ -91,6 +93,7 @@
       display: flex; flex-direction: column; background: #fff; color: #1f1f1f; border: 1px solid #dadce0; border-radius: 12px;
       box-shadow: 0 4px 16px rgba(0,0,0,.18); font: 13px/1.4 "Google Sans", Roboto, Arial, sans-serif; }
     .panel.collapsed { width: auto; }
+    .panel.hidden { display: none; }
     .panel.collapsed .body { display: none; }
     .head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; cursor: pointer; user-select: none; }
     .head .label { font-size: 11px; color: #5f6368; text-transform: uppercase; letter-spacing: .5px; }
@@ -144,20 +147,112 @@
     }
   `;
 
+  const BADGE_CSS = `
+    :host { all: initial; display: block; margin-left: auto; padding-left: 16px; flex: none; }
+    .badge { text-align: right; font-family: "Google Sans", Roboto, Arial, sans-serif; white-space: nowrap; }
+    .label { font-size: 14px; color: #5f6368; }
+    .pct { font-size: 28px; line-height: 40px; color: #1a73e8; font-variant-numeric: tabular-nums; }
+    .tag { font-size: 10px; background: #fef7e0; color: #b06000; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+    button { font: 500 14px "Google Sans", Roboto, Arial, sans-serif; color: #1a73e8; background: none; border: 0; padding: 4px 0; cursor: pointer; }
+    button:hover { text-decoration: underline; }
+    button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
+    @media (prefers-color-scheme: dark) { .label { color: #bdc1c6; } .pct, button { color: #8ab4f8; } }
+  `;
+
+  function addStyles(root, css) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(css);
+      root.adoptedStyleSheets = [sheet];
+    } catch (e) {
+      const st = document.createElement('style');
+      st.textContent = css;
+      root.append(st);
+    }
+  }
+
+  // The header row with the student's avatar and name. Classroom puts the
+  // overall grade at its right edge when the teacher allows it.
+  function findSlot() {
+    for (const h2 of document.querySelectorAll('h2')) {
+      if (!h2.getClientRects().length) continue;
+      let row = h2.parentElement;
+      for (let i = 0; i < 4 && row && row !== document.body; i++, row = row.parentElement) {
+        if (!row.querySelector('img')) continue;
+        const area = (row.parentElement && row.parentElement.parentElement) || row;
+        if (/\d\s*%/.test(area.textContent)) return null; // Classroom is showing its own grade
+        return row;
+      }
+    }
+    return null;
+  }
+
+  // Returns true when the badge was added, moved or removed.
+  function ensureBadge() {
+    const slot = findSlot();
+    if (!slot) {
+      if (!badge) return false;
+      badge.remove();
+      badge = badgeRefs = null;
+      return true;
+    }
+    if (badge && badge.isConnected && badge.parentElement === slot) return false;
+    if (badge) badge.remove();
+    badge = document.createElement('div');
+    badge.setAttribute('data-grade-calc-badge', '');
+    const root = badge.attachShadow({ mode: 'open' });
+    addStyles(root, BADGE_CSS);
+    badgeRefs = {
+      label: h('span', {}),
+      tag: h('span', { class: 'tag' }, 'what-if'),
+      pct: h('div', { class: 'pct' }),
+      link: h('button', { type: 'button', onclick: () => setCollapsed(!settings.collapsed) }),
+    };
+    root.append(h('div', { class: 'badge' },
+      h('div', { class: 'label' }, badgeRefs.label, badgeRefs.tag), badgeRefs.pct, badgeRefs.link));
+    slot.append(badge);
+    return true;
+  }
+
+  function setCollapsed(value) {
+    settings.collapsed = value;
+    save();
+    applyCollapsed();
+  }
+
+  function applyCollapsed() {
+    if (!refs) return;
+    refs.panel.classList.toggle('collapsed', settings.collapsed);
+    refs.panel.classList.toggle('hidden', settings.collapsed && !!badge);
+    if (badgeRefs) {
+      badgeRefs.link.textContent = settings.collapsed ? 'View details' : 'Hide details';
+      badgeRefs.link.setAttribute('aria-expanded', String(!settings.collapsed));
+    }
+    position();
+  }
+
+  // With a badge, the panel drops down beneath it (and stays on screen when
+  // the header scrolls away); otherwise it floats in the top-right corner.
+  function position() {
+    if (!refs) return;
+    const st = refs.panel.style;
+    if (!badge || !badge.isConnected) {
+      st.top = st.right = st.maxHeight = '';
+      return;
+    }
+    const r = badge.getBoundingClientRect();
+    const top = Math.max(76, Math.round(r.bottom + 8));
+    st.top = top + 'px';
+    st.right = Math.max(16, Math.round(window.innerWidth - r.right)) + 'px';
+    st.maxHeight = 'calc(100vh - ' + (top + 16) + 'px)';
+  }
+
   function ensureHost() {
     if (host && host.isConnected) return;
     host = document.createElement('div');
     host.setAttribute('data-grade-calc', '');
     shadow = host.attachShadow({ mode: 'open' });
-    try {
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(CSS);
-      shadow.adoptedStyleSheets = [sheet];
-    } catch (e) {
-      const st = document.createElement('style');
-      st.textContent = CSS;
-      shadow.append(st);
-    }
+    addStyles(shadow, CSS);
     document.documentElement.append(host);
     refs = null;
   }
@@ -176,11 +271,7 @@
     const head = h('div', {
       class: 'head',
       title: 'Click to collapse / expand',
-      onclick: () => {
-        settings.collapsed = !settings.collapsed;
-        save();
-        refs.panel.classList.toggle('collapsed', settings.collapsed);
-      },
+      onclick: () => setCollapsed(!settings.collapsed),
     },
       h('div', { class: 'grow' }, h('div', { class: 'label' }, 'Calculated grade', refs.tag), refs.sub),
       refs.pct
@@ -313,6 +404,7 @@
     refs.panel = h('div', { class: 'panel' + (settings.collapsed ? ' collapsed' : ''), role: 'region', 'aria-label': 'Grade calculator' }, head, body);
     shadow.querySelectorAll('.panel').forEach((p) => p.remove());
     shadow.append(refs.panel);
+    applyCollapsed();
     refresh();
   }
 
@@ -326,6 +418,12 @@
         ? fmt(res.totalEarned) + ' / ' + fmt(res.totalPossible) + ' points'
         : 'Weighted by category';
     refs.tag.style.display = res.usedWhatIf ? '' : 'none';
+    if (badgeRefs) {
+      const period = activePeriod();
+      badgeRefs.label.textContent = period === ALL_PERIODS ? 'Calculated grade' : period + ' (calculated)';
+      badgeRefs.pct.textContent = fmtPct(res.percent);
+      badgeRefs.tag.style.display = res.usedWhatIf ? '' : 'none';
+    }
     for (const c of res.categories) {
       const r = refs.cats.get(c.name);
       if (!r) continue;
@@ -355,6 +453,10 @@
       const active = forced || WORK_PAGE_RE.test(location.pathname);
       if (!active) {
         if (host) host.style.display = 'none';
+        if (badge) {
+          badge.remove();
+          badge = badgeRefs = null;
+        }
         lastSignature = null;
         return;
       }
@@ -366,12 +468,14 @@
       }
       const next = parsePage(document);
       const sig = JSON.stringify(next);
-      if (sig !== lastSignature || !host || !host.isConnected) {
+      const badgeChanged = ensureBadge();
+      if (sig !== lastSignature || !host || !host.isConnected || badgeChanged) {
         parsed = next;
         lastSignature = sig;
         build();
       }
       host.style.display = '';
+      position();
     } catch (e) {
       console.error('[Grade Calculator]', e);
     } finally {
@@ -383,15 +487,15 @@
     childList: true, subtree: true, characterData: true,
   });
   window.addEventListener('popstate', () => schedule(100));
+  window.addEventListener('scroll', position, { capture: true, passive: true });
+  window.addEventListener('resize', position, { passive: true });
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg) => {
       if (!msg || msg.type !== 'grade-calc-toggle') return;
       const shown = host && host.isConnected && host.style.display !== 'none';
       if (shown && WORK_PAGE_RE.test(location.pathname)) {
-        settings.collapsed = !settings.collapsed;
-        save();
-        if (refs) refs.panel.classList.toggle('collapsed', settings.collapsed);
+        setCollapsed(!settings.collapsed);
       } else {
         forced = !shown;
         schedule(0);
