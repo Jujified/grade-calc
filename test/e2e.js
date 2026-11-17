@@ -82,12 +82,13 @@ const near = (a, b) => assert.ok(Math.abs(a - b) < 0.006, `${a} != ${b}`);
   await page.goto('https://classroom.google.com/u/1/c/CCC/sp/123/all/default');
   await panel.waitFor();
   const badge = page.locator('[data-grade-calc-badge]');
-  near(await pct(), (9.5 + 92.5) / 110 * 100);
-  assert.match(await panel.locator('summary').innerText(), /2 graded of 5/i);
+  near(await pct(), (9.5 + 92.5 + 8) / 120 * 100);
+  assert.match(await panel.locator('summary').innerText(), /3 graded of 6/i);
+  assert.match(await panel.locator('.body > .hint').last().innerText(), /1 row\(s\) could not be read/);
   assert.deepEqual(await panel.locator('tbody tr td:first-child').allInnerTexts(),
     ['Peer Coverages', 'Script Submissions', 'No category']);
   // grade is shown in the header, at the right of the student's name
-  near(parseFloat(await badge.locator('.pct').innerText()), (9.5 + 92.5) / 110 * 100);
+  near(parseFloat(await badge.locator('.pct').innerText()), (9.5 + 92.5 + 8) / 120 * 100);
   assert.match(await badge.locator('.label').innerText(), /Semester 1/);
   const bb = await badge.boundingBox();
   const nb = await page.locator('h2:visible', { hasText: 'Julian Cimoca' }).boundingBox();
@@ -99,9 +100,9 @@ const near = (a, b) => assert.ok(Math.abs(a - b) < 0.006, `${a} != ${b}`);
   await badge.getByRole('button', { name: 'View details' }).click();
   await panel.getByRole('button', { name: 'Weighted by category' }).click();
   await panel.getByLabel('Weight for Peer Coverages').fill('40');
-  await panel.getByLabel('Weight for Script Submissions').fill('60');
-  near(await pct(), 0.4 * 95 + 0.6 * 92.5);
-  near(parseFloat(await badge.locator('.pct').innerText()), 0.4 * 95 + 0.6 * 92.5);
+  await panel.getByLabel('Weight for Script Submissions').fill('60%');
+  near(await pct(), 0.4 * 87.5 + 0.6 * 92.5);
+  near(parseFloat(await badge.locator('.pct').innerText()), 0.4 * 87.5 + 0.6 * 92.5);
 
   // --- Fixture D: no grading periods, tests posted without a category ---
   await page.goto('https://classroom.google.com/c/DDD/sp/123/all');

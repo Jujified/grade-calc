@@ -101,7 +101,7 @@
   const fmt = (n) => String(round2(n));
   const fmtPct = (n) => (n == null ? '—' : round2(n).toFixed(2) + '%');
   function readNum(input) {
-    const v = input.value.trim().replace(',', '.');
+    const v = input.value.trim().replace(/\s*%$/, '').replace(',', '.');
     if (v === '' || !/^\d*\.?\d+$|^\d+\.$/.test(v)) return null;
     const n = parseFloat(v);
     return Number.isFinite(n) && n >= 0 ? n : null;
@@ -227,7 +227,7 @@
 
   // Returns true when the badge was added, moved or removed.
   function ensureBadge() {
-    const slot = findSlot();
+    const slot = WORK_PAGE_RE.test(location.pathname) ? findSlot() : null;
     if (!slot) {
       if (!badge) return false;
       badge.remove();
@@ -279,9 +279,14 @@
       return;
     }
     const r = badge.getBoundingClientRect();
+    if (!r.width && !r.height) { // header not rendered right now: use the default corner
+      st.top = st.right = st.maxHeight = '';
+      return;
+    }
     const top = Math.max(76, Math.round(r.bottom + 8));
+    const maxRight = Math.max(16, window.innerWidth - 376); // keep the 360px panel on screen
     st.top = top + 'px';
-    st.right = Math.max(16, Math.round(window.innerWidth - r.right)) + 'px';
+    st.right = Math.min(maxRight, Math.max(16, Math.round(window.innerWidth - r.right))) + 'px';
     st.maxHeight = 'calc(100vh - ' + (top + 16) + 'px)';
   }
 
@@ -375,7 +380,7 @@
         }
       }
       refs.cats.set(c.name, r);
-      const custom = settings.customCats.includes(c.name);
+      const custom = settings.customCats.includes(c.name) && !parsed.categories.includes(c.name);
       tbody.append(h('tr', {},
         h('td', {}, c.name === null ? 'No category' : c.name,
           custom && h('button', {
@@ -583,6 +588,7 @@
       if (key !== courseKey) {
         settings = await load(key);
         courseKey = key;
+        addFormOpen = false;
         lastSignature = null;
       }
       const next = parsePage(document);

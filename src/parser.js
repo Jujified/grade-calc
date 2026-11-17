@@ -103,11 +103,17 @@
       const text = first === n ? clean(p.textContent) : clean(n.nodeValue);
       return META_RE.test(text) || META_RE.test(clean(n.nodeValue));
     });
-    // An assignment *title* can also start with "Due ..." (e.g. "Due Nov 5 essay").
-    // Titles are set in a larger font than the due line, so keep the smallest.
+    // An assignment *title* can also start with "Due ..." (e.g. "Due Nov 5 essay"),
+    // and other parts of the page may mention due dates. Real due lines all share
+    // one font size, so keep the most common size (the smaller one on a tie).
     if (markers.length) {
-      const min = Math.min(...markers.map((n) => style(n.parentElement).size));
-      markers = markers.filter((n) => style(n.parentElement).size <= min + 0.5);
+      const counts = new Map();
+      for (const n of markers) {
+        const size = Math.round(style(n.parentElement).size * 2) / 2;
+        counts.set(size, (counts.get(size) || 0) + 1);
+      }
+      const [common] = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+      markers = markers.filter((n) => Math.abs(style(n.parentElement).size - common) <= 0.5);
     }
 
     // 2. Each due line belongs to one row: the largest ancestor holding only it.
@@ -117,7 +123,11 @@
       for (const m of markerSet) if (el.contains(m)) c++;
       return c;
     }
+    const seenRows = new Set();
     const rows = markers.map((m) => {
+      // Classroom marks each row with the assignment's id; use that element when present.
+      const tagged = m.parentElement.closest('[data-stream-item-id]');
+      if (tagged && tagged !== doc.body) return { marker: m, el: tagged };
       let el = m.parentElement;
       while (el.parentElement && el.parentElement !== doc.body.parentElement) {
         const up = el.parentElement;
@@ -126,6 +136,11 @@
         el = up;
       }
       return { marker: m, el };
+    }).filter((r) => {
+      // An expanded row can repeat its due date; one row is one assignment.
+      if (seenRows.has(r.el)) return false;
+      seenRows.add(r.el);
+      return true;
     });
 
     // 3. Pull title, meta line and score out of each row.
@@ -158,6 +173,11 @@
       if (metaEl.contains(titleNode)) metaEl = marker.parentElement;
       const metaNodes = nodes.filter((n) => metaEl.contains(n));
       const meta = splitMeta(clean(metaEl.textContent), metaNodes.map((n) => n.nodeValue));
+      // Classroom lays the line out as three boxes: due date, grading period, category.
+      // A filled second box with an empty third is a period with no category.
+      const boxes = metaEl.children;
+      const periodOnly = meta.rest.length === 1 && boxes.length === 3 && boxes[0].contains(marker) &&
+        clean(boxes[1].textContent) === meta.rest[0] && !clean(boxes[2].textContent);
 
       const others = nodes.filter((n) => n !== titleNode && !metaEl.contains(n));
       // The score can be one text node ("9/10") or split across elements
@@ -185,12 +205,22 @@
       // Classroom tags each row with a stable assignment id; prefer it for what-ifs.
       const idEl = el.closest('[data-stream-item-id]') || el.querySelector('[data-stream-item-id]');
       const streamId = idEl ? idEl.getAttribute('data-stream-item-id') : null;
-      raw.push({ title: clean(titleNode.nodeValue), due: meta.due, rest: meta.rest, score, status, streamId });
+      raw.push({ title: clean(titleNode.nodeValue), due: meta.due, rest: meta.rest, score, status, streamId, periodOnly });
+    }
+
+    // Safety net: assignment rows Classroom tagged but whose due line was not
+    // recognised must not vanish silently, so report them as unread.
+    const listParents = new Set(rows.map((r) => r.el.parentElement));
+    for (const parent of listParents) {
+      if (!parent) continue;
+      for (const child of parent.children) {
+        if (child.hasAttribute('data-stream-item-id') && !seenRows.has(child) && visible(child)) unparsed++;
+      }
     }
 
     // 4. Decide which meta parts are grading periods and which are categories.
     //    Rows with two parts are always "period • category".
-    const knownPeriods = new Set(raw.filter((r) => r.rest.length >= 2).map((r) => r.rest[0]));
+    const knownPeriods = new Set(raw.filter((r) => r.rest.length >= 2 || r.periodOnly).map((r) => r.rest[0]));
     const seenIds = new Map();
     const items = raw.map((r) => {
       let period = null;
