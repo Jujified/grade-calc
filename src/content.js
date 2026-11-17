@@ -8,7 +8,7 @@
   const { parsePage } = globalThis.GradeCalc.parser;
 
   const WORK_PAGE_RE = /\/c\/[^/]+\/sp\//; // a student's "Your work" page
-  const DEFAULTS = { mode: 'points', weights: {}, period: null, whatIfs: {}, collapsed: false };
+  const DEFAULTS = { mode: 'points', weights: {}, period: null, whatIfs: {}, collapsed: false, customCats: [], assign: {} };
 
   // ---------- storage ----------
   const memory = {};
@@ -23,6 +23,8 @@
     return Object.assign({}, DEFAULTS, saved, {
       weights: Object.assign({}, saved && saved.weights),
       whatIfs: Object.assign({}, saved && saved.whatIfs),
+      customCats: [...((saved && saved.customCats) || [])],
+      assign: Object.assign({}, saved && saved.assign),
     });
   }
   function save() {
@@ -47,6 +49,7 @@
   let shadow = null;
   let badge = null; // inline grade shown in the page header, where Classroom's own grade would be
   let badgeRefs = null;
+  let addFormOpen = false;
 
   function getCourseKey() {
     const m = /\/c\/([^/?#]+)/.exec(location.pathname);
@@ -59,8 +62,26 @@
     return parsed.periods[0]; // newest work is listed first
   }
 
+  // Every category an assignment can be put in: Classroom's plus the student's own.
+  function allCategories() {
+    return [...new Set([...parsed.categories, ...settings.customCats])];
+  }
+
+  // Assignments Classroom lists without a category can be sorted into one by the student.
+  function effectiveItems() {
+    const valid = new Set(allCategories());
+    return parsed.items.map((i) => {
+      if (i.category) return i;
+      const chosen = settings.assign[i.id];
+      return Object.assign({}, i, { unsorted: true, category: valid.has(chosen) ? chosen : null });
+    });
+  }
+
   function result() {
-    return compute(parsed.items, Object.assign({}, settings, { period: activePeriod() }));
+    return compute(effectiveItems(), Object.assign({}, settings, {
+      period: activePeriod(),
+      categories: settings.customCats,
+    }));
   }
 
   // ---------- helpers ----------
@@ -134,11 +155,28 @@
     .item.whatif input { border-color: #f9ab00; background: #fffbf0; }
     .item .icon-btn { visibility: hidden; width: 22px; height: 22px; font-size: 12px; }
     .item.whatif .icon-btn { visibility: visible; }
+    .icon-btn.small { width: 20px; height: 20px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
+    .cat-select { width: auto; max-width: 150px; flex: none; font-size: 11px; padding: 1px 2px; }
+    .addform { margin-top: 12px; padding: 0 10px 10px; border: 1px solid #dadce0; border-radius: 8px; }
+    .addform h3 { margin-top: 10px; }
+    .name-input { width: 100%; text-align: left; }
+    .checks { max-height: 150px; overflow-y: auto; margin-top: 2px; }
+    .check { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
+    .check input { width: auto; flex: none; margin: 0; }
+    .check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .error { color: #c5221f; font-size: 12px; margin-top: 6px; }
+    .error:empty { display: none; }
+    .actions { display: flex; gap: 8px; margin-top: 10px; }
+    .btn { border: 1px solid #dadce0; background: none; border-radius: 6px; padding: 5px 12px; }
+    .btn.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
     .link { border: 0; background: none; color: #1a73e8; padding: 0; margin-top: 10px; font-size: 12px; }
     @media (prefers-color-scheme: dark) {
       .panel, select, input, .seg button { background: #202124; color: #e8eaed; }
       .panel, select, input, .seg, .seg button + button, .body { border-color: #5f6368; }
       .head .pct, .link { color: #8ab4f8; }
+      .addform, .btn { border-color: #5f6368; }
+      .btn.primary { background: #8ab4f8; border-color: #8ab4f8; color: #202124; }
+      .error { color: #f28b82; }
       .seg button[aria-pressed="true"] { background: #394457; color: #d2e3fc; }
       td, .item { border-top-color: #3c4043; }
       .icon-btn:hover { background: #3c4043; }
@@ -261,7 +299,14 @@
   function build() {
     ensureHost();
     const period = activePeriod();
-    const items = parsed.items.filter((i) => inPeriod(i, period));
+    const items = effectiveItems().filter((i) => inPeriod(i, period));
+    const categoryNames = allCategories();
+    const oldBody = shadow.querySelector('.body');
+    const scrollTop = oldBody ? oldBody.scrollTop : 0;
+    // Keep the assignment list open across rebuilds (its toggle event arrives late).
+    const oldDetails = shadow.querySelector('details');
+    const detailsOpen = oldDetails ? oldDetails.open : !!settings.detailsOpen;
+    settings.detailsOpen = detailsOpen;
     const weighted = settings.mode === 'weighted';
     refs = { cats: new Map(), items: new Map() };
 
@@ -330,7 +375,20 @@
         }
       }
       refs.cats.set(c.name, r);
-      tbody.append(h('tr', {}, h('td', {}, c.name === null ? 'No category' : c.name), r.score, r.pct, weightCell));
+      const custom = settings.customCats.includes(c.name);
+      tbody.append(h('tr', {},
+        h('td', {}, c.name === null ? 'No category' : c.name,
+          custom && h('button', {
+            type: 'button', class: 'icon-btn small', title: 'Remove this category', 'aria-label': 'Remove category ' + c.name,
+            onclick: () => {
+              settings.customCats = settings.customCats.filter((n) => n !== c.name);
+              for (const id of Object.keys(settings.assign)) if (settings.assign[id] === c.name) delete settings.assign[id];
+              delete settings.weights[c.name];
+              save();
+              build();
+            },
+          }, '✕')),
+        r.score, r.pct, weightCell));
     }
     body.append(
       h('h3', {}, 'Categories'),
@@ -340,6 +398,51 @@
     );
     refs.warnings = h('div');
     body.append(refs.warnings);
+
+    // Add your own category and choose which uncategorized assignments belong to it.
+    const unsorted = items.filter((i) => i.unsorted && !i.category);
+    if (!addFormOpen) {
+      body.append(h('button', { type: 'button', class: 'link', onclick: () => {
+        addFormOpen = true;
+        build();
+        refs.panel.querySelector('.addform input').focus();
+      } }, '+ Add category'));
+    } else {
+      const nameInput = h('input', { type: 'text', class: 'name-input', placeholder: 'Category name, e.g. Tests', 'aria-label': 'New category name', maxlength: '60' });
+      const error = h('div', { class: 'error', role: 'alert' });
+      const checks = unsorted.map((item) => {
+        const box = h('input', { type: 'checkbox' });
+        return { item, box, row: h('label', { class: 'check' }, box, h('span', { title: item.title }, item.title)) };
+      });
+      const submit = () => {
+        const name = nameInput.value.replace(/\s+/g, ' ').trim();
+        if (!name) return void (error.textContent = 'Type a name for the category.');
+        if (allCategories().some((n) => n.toLowerCase() === name.toLowerCase())) {
+          return void (error.textContent = 'There is already a category with that name.');
+        }
+        settings.customCats.push(name);
+        for (const c of checks) if (c.box.checked) settings.assign[c.item.id] = name;
+        addFormOpen = false;
+        save();
+        build();
+      };
+      nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submit();
+      });
+      body.append(h('div', { class: 'addform' },
+        h('h3', {}, 'New category'),
+        nameInput,
+        checks.length
+          ? [h('div', { class: 'hint' }, 'Tick the assignments that belong to it:'), h('div', { class: 'checks' }, checks.map((c) => c.row))]
+          : h('div', { class: 'hint' }, 'There are no uncategorized assignments right now. You can still add the category and give it a weight.'),
+        error,
+        h('div', { class: 'actions' },
+          h('button', { type: 'button', class: 'btn primary', onclick: submit }, 'Add category'),
+          h('button', { type: 'button', class: 'btn', onclick: () => {
+            addFormOpen = false;
+            build();
+          } }, 'Cancel'))));
+    }
 
     // Assignments with what-if inputs
     const list = h('div');
@@ -368,7 +471,21 @@
       r.row = h('div', { class: 'item' },
         h('div', { class: 't' },
           h('div', { class: 'name', title: item.title }, item.title),
-          h('div', { class: 'cat' }, [item.category || 'No category', item.graded ? null : item.status || 'Not graded'].filter(Boolean).join(' · '))),
+          item.unsorted && categoryNames.length
+            ? h('div', { class: 'cat' },
+              h('select', {
+                class: 'cat-select', 'aria-label': 'Category for ' + item.title,
+                onchange: (e) => {
+                  if (e.target.value) settings.assign[item.id] = e.target.value;
+                  else delete settings.assign[item.id];
+                  save();
+                  build();
+                },
+              },
+                h('option', { value: '', selected: !item.category }, 'No category'),
+                categoryNames.map((n) => h('option', { value: n, selected: n === item.category }, n))),
+              item.graded ? null : ' · ' + (item.status || 'Not graded'))
+            : h('div', { class: 'cat' }, [item.category || 'No category', item.graded ? null : item.status || 'Not graded'].filter(Boolean).join(' · '))),
         r.earned, '/', r.possible,
         h('button', {
           type: 'button', class: 'icon-btn', title: 'Remove what-if', 'aria-label': 'Remove what-if for ' + item.title,
@@ -384,7 +501,8 @@
       list.append(r.row);
     }
     const graded = items.filter((i) => i.graded).length;
-    refs.details = h('details', { open: !!settings.detailsOpen, ontoggle: () => {
+    refs.details = h('details', { open: detailsOpen, ontoggle: (e) => {
+      if (e.target !== refs.details) return; // a stale event from a list that was since rebuilt
       settings.detailsOpen = refs.details.open;
       save();
     } },
@@ -406,6 +524,7 @@
     shadow.append(refs.panel);
     applyCollapsed();
     refresh();
+    body.scrollTop = scrollTop;
   }
 
   function refresh() {

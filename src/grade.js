@@ -25,7 +25,8 @@
     return !item.period || item.period === period;
   }
 
-  // settings: { mode: 'points' | 'weighted', weights: {category: number}, period, whatIfs }
+  // settings: { mode: 'points' | 'weighted', weights: {category: number}, period, whatIfs,
+  //             categories: extra category names to list even when empty }
   function compute(items, settings) {
     const mode = settings.mode === 'weighted' ? 'weighted' : 'points';
     const weights = settings.weights || {};
@@ -46,6 +47,16 @@
       cat.possible += score.possible;
       cat.counted++;
       if (score.whatIf) usedWhatIf = true;
+    }
+
+    // Categories the student created themselves show up even while empty.
+    for (const name of settings.categories || []) {
+      if (name && !cats.has(name)) cats.set(name, { name, earned: 0, possible: 0, count: 0, counted: 0 });
+    }
+    const loose0 = cats.get(null);
+    if (loose0) {
+      cats.delete(null);
+      cats.set(null, loose0); // keep "No category" last
     }
 
     const categories = [...cats.values()].map((c) => {
@@ -84,7 +95,7 @@
       }
       const loose = categories.find((c) => c.name === null);
       if (loose && loose.counted > 0) {
-        warnings.push(loose.counted + ' graded item(s) with no category are not counted in a weighted grade (Classroom does the same).');
+        warnings.push(loose.counted + ' graded item(s) with no category are not counted in a weighted grade. Use "Add category" to put them in one.');
       }
     }
 

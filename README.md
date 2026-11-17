@@ -25,6 +25,10 @@ grade. Supports weighted categories, grading periods and what-if scores.
   Classroom does not show weights when the grade is hidden). Each category's
   score is its points earned ÷ points possible; categories with no graded work
   yet are left out and the remaining weights rescaled, the same way Classroom does it.
+- **Your own categories**: if the teacher posts work without a category (for
+  example tests), click **+ Add category**, name it, tick the uncategorized
+  assignments that belong to it and give it a weight. You can move an
+  uncategorized assignment later from the dropdown under its name in *Assignments*.
 - **What-if**: open *Assignments* and type a score into any assignment (for
   ungraded work, fill in both the score and the points possible).
 - Ungraded, missing-without-a-score and excused work is not counted.
